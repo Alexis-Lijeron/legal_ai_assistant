@@ -41,4 +41,48 @@ class ChatService {
       );
     }
   }
+
+  // 🔥 Obtener lista de chats
+  static Future<List<Map<String, dynamic>>> obtenerChats() async {
+    final token = await PreferenciasUsuario.obtenerToken();
+
+    final response = await http.get(
+      Uri.parse('${ApiConfig.baseUrl}/chats'),
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer $token",
+      },
+    );
+
+    if (response.statusCode == 200) {
+      final lista = List<Map<String, dynamic>>.from(
+        jsonDecode(utf8.decode(response.bodyBytes)),
+      );
+
+      // 👀 Imprime los chats que llegan
+      print("Chats recibidos: $lista");
+
+      return lista;
+    } else {
+      throw Exception(
+        'Error al obtener chats: ${utf8.decode(response.bodyBytes)}',
+      );
+    }
+  }
+
+  // Obtener todos los mensajes de un chat
+  static Future<List<dynamic>> obtenerMensajes(int idChat) async {
+    final token = await PreferenciasUsuario.obtenerToken();
+    print('Llamando a obtenerMensajes con idChat: $idChat');
+    final response = await http.get(
+      Uri.parse('${ApiConfig.baseUrl}/mensajes/chat/$idChat'),
+      headers: {"Authorization": "Bearer $token"},
+    );
+
+    if (response.statusCode == 200) {
+      return jsonDecode(utf8.decode(response.bodyBytes));
+    } else {
+      throw Exception('Error al obtener mensajes del chat: ${response.body}');
+    }
+  }
 }

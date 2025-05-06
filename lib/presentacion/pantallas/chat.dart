@@ -15,7 +15,10 @@ import 'package:legal_ai_assistant/preferencias/preferencias_usuario.dart';
 import 'dart:convert';
 
 class ChatPantalla extends StatefulWidget {
-  const ChatPantalla({super.key});
+  final int? idChat;
+  final String? tituloChat;
+
+  const ChatPantalla({super.key, this.idChat, this.tituloChat});
 
   @override
   _ChatPantallaState createState() => _ChatPantallaState();
@@ -48,6 +51,8 @@ class _ChatPantallaState extends State<ChatPantalla> {
   @override
   void initState() {
     super.initState();
+    idChat = widget.idChat;
+    tituloChat = widget.tituloChat ?? 'Asistente Legal';
     _verificarToken();
   }
 
@@ -56,6 +61,45 @@ class _ChatPantallaState extends State<ChatPantalla> {
     setState(() {
       token = tk;
     });
+
+    if (idChat != null) {
+      await _cargarMensajesAnteriores();
+    }
+  }
+
+  Future<void> _cargarMensajesAnteriores() async {
+    try {
+      final mensajesBackend = await ChatService.obtenerMensajes(idChat!);
+      mensajes.clear();
+      historialLogueado.clear();
+
+      for (var mensaje in mensajesBackend) {
+        mensajes.add({
+          "texto": mensaje['contenido'],
+          "tipo": mensaje['tipo'] == 'pregunta' ? 'persona' : 'asistente',
+        });
+
+        // Solo guardamos en historial si es tipo pregunta/respuesta
+        if (mensaje['tipo'] == 'pregunta') {
+          historialLogueado.add("Persona: ${mensaje['contenido']}");
+        } else {
+          historialLogueado.add("Asistente: ${mensaje['contenido']}");
+        }
+      }
+
+      // Si hay mensajes previos, actualizamos también el idContexto
+      if (mensajesBackend.isNotEmpty) {
+        idContexto = mensajesBackend.last['id_contexto'];
+      }
+
+      setState(() {});
+    } catch (e) {
+      mensajes.add({
+        "texto": "Error al cargar mensajes anteriores: $e",
+        "tipo": "asistente",
+      });
+      setState(() {});
+    }
   }
 
   @override
@@ -112,6 +156,7 @@ class _ChatPantallaState extends State<ChatPantalla> {
         );
 
         final respuestaAsistente = resultado['respuesta'];
+
         // Guardar en historial (ventana deslizante de hasta 6 líneas = 3 interacciones)
         historialLogueado.add("Persona: $texto");
         historialLogueado.add("Asistente: $respuestaAsistente");

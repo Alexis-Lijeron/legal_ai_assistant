@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:legal_ai_assistant/presentacion/pantallas/ajustes_pantalla.dart';
+import 'package:legal_ai_assistant/presentacion/pantallas/consulta_documento.dart';
 import 'package:legal_ai_assistant/presentacion/pantallas/login_pantalla.dart';
+import 'package:legal_ai_assistant/presentacion/pantallas/chat_historial.dart';
 import 'package:legal_ai_assistant/preferencias/preferencias_usuario.dart';
 
 class BarraLateral extends StatefulWidget {
@@ -34,7 +36,7 @@ class _BarraLateralState extends State<BarraLateral> {
     Navigator.of(context).pop(); // Cierra el Drawer
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(SnackBar(content: Text('Sesión cerrada')));
+    ).showSnackBar(const SnackBar(content: Text('Sesión cerrada')));
   }
 
   @override
@@ -53,7 +55,7 @@ class _BarraLateralState extends State<BarraLateral> {
 
           // Chat siempre disponible
           ListTile(
-            title: const Text('Chat'),
+            title: const Text('Chat nuevo'),
             onTap: () {
               Navigator.pop(context); // Cierra el Drawer
             },
@@ -64,15 +66,25 @@ class _BarraLateralState extends State<BarraLateral> {
             ListTile(
               title: const Text('Documentos'),
               onTap: () {
-                // Navegar a Documentos (por ahora puede ser un print o Navigator)
-                print('Ir a Documentos');
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const ConsultaDocumentoPantalla(),
+                  ),
+                );
               },
             ),
             ListTile(
-              title: const Text('Historial'),
+              title: const Text('Historial de chats'),
               onTap: () {
-                // Navegar a Historial
-                print('Ir a Historial');
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const ChatHistorialPantalla(),
+                  ),
+                );
               },
             ),
           ],
@@ -92,24 +104,20 @@ class _BarraLateralState extends State<BarraLateral> {
 
           const Divider(),
 
-          // Mostrar "Iniciar Sesión" o "Cerrar Sesión" según el estado
           if (token == null)
             ListTile(
-              leading: Icon(Icons.login),
+              leading: const Icon(Icons.login),
               title: const Text('Iniciar Sesión'),
               onTap: () {
                 Navigator.push(
                   context,
                   MaterialPageRoute(builder: (context) => LoginPantalla()),
-                ).then((_) {
-                  // Cuando vuelva del login, recargar token
-                  cargarToken();
-                });
+                ).then((_) => cargarToken());
               },
             )
           else
             ListTile(
-              leading: Icon(Icons.logout),
+              leading: const Icon(Icons.logout),
               title: const Text('Cerrar Sesión'),
               onTap: cerrarSesion,
             ),
