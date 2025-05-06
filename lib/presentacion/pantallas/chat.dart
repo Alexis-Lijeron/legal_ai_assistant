@@ -1,11 +1,17 @@
 // ignore_for_file: library_private_types_in_public_api, deprecated_member_use
 
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:legal_ai_assistant/config/api_config.dart';
 import 'package:legal_ai_assistant/presentacion/componentes/burbujas_de_mensaje.dart';
 import 'package:legal_ai_assistant/presentacion/componentes/barra_lateral.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
-import 'package:http/http.dart' as http;
+
+import 'package:legal_ai_assistant/servicios/chat_service.dart';
+import 'package:legal_ai_assistant/servicios/contexto_service.dart';
+import 'package:legal_ai_assistant/servicios/rag_service.dart';
+import 'package:legal_ai_assistant/preferencias/preferencias_usuario.dart';
 import 'dart:convert';
 
 class ChatPantalla extends StatefulWidget {
@@ -22,18 +28,46 @@ class _ChatPantallaState extends State<ChatPantalla> {
 
   bool _cargando = false;
   bool _escuchando = false;
-  bool _grabando = false; // Para saber si estamos grabando
+  bool _grabando = false;
 
   List<Map<String, String>> mensajes = [
     {"texto": "👩‍⚖️ Bienvenido, ¿en qué puedo ayudarte?", "tipo": "asistente"},
   ];
-  
+
+  // 🔑 Chat y contexto actuales
+  int? idChat;
+  int? idContexto;
+  List<String> historialLogueado = [];
+
+  // Para detectar si hay usuario logueado
+  String? token;
+
+  // 🔥 Para mostrar el título del chat
+  String tituloChat = 'Asistente Legal';
+
+  @override
+  void initState() {
+    super.initState();
+    _verificarToken();
+  }
+
+  Future<void> _verificarToken() async {
+    final tk = await PreferenciasUsuario.obtenerToken();
+    setState(() {
+      token = tk;
+    });
+  }
+
   @override
   void dispose() {
     flutterTts.stop();
     _controladorTexto.dispose();
     super.dispose();
   }
+
+  String? oldQuestionAnon;
+  String? oldResponseAnon;
+  List<String> historialAnon = [];
 
   Future<void> _enviarMensaje() async {
     final texto = _controladorTexto.text.trim();
@@ -46,28 +80,89 @@ class _ChatPantallaState extends State<ChatPantalla> {
     });
 
     try {
-      final respuesta = await http.post(
-        Uri.parse('https://TU_BACKEND_URL/chat'), // Cambia por tu URL real
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({"mensaje": texto}),
-      );
+      if (token != null) {
+        // ================================
+        // 🔥 USUARIO LOGUEADO - Usa el backend completo
+        // ================================
 
-      if (respuesta.statusCode == 200) {
-        final data = json.decode(respuesta.body);
-        final respuestaAsistente = data["respuesta"];
+        // 1️⃣ Si no existe un chat todavía, crearlo
+        if (idChat == null) {
+          final titulo = texto.length > 50 ? texto.substring(0, 50) : texto;
+          final nuevoChat = await ChatService.crearChat(titulo);
+          idChat = nuevoChat.idChat;
+          tituloChat = nuevoChat.titulo;
+          setState(() {}); // Para actualizar el título del AppBar
+        }
+
+        // 2️⃣ Si no existe contexto todavía, crearlo
+        if (idContexto == null) {
+          final nuevoContexto = await ContextoService.crearContexto(
+            idChat!,
+            "Primer contexto automático",
+          );
+          idContexto = nuevoContexto.idContexto;
+        }
+
+        // 3️⃣ Enviar la pregunta al servicio RAG
+        final resultado = await RagService.buscarRespuesta(
+          pregunta: texto,
+          idChat: idChat!,
+          idContexto: idContexto!,
+          historial: historialLogueado,
+        );
+
+        final respuestaAsistente = resultado['respuesta'];
+        // Guardar en historial (ventana deslizante de hasta 6 líneas = 3 interacciones)
+        historialLogueado.add("Persona: $texto");
+        historialLogueado.add("Asistente: $respuestaAsistente");
+        if (historialLogueado.length > 6) {
+          historialLogueado = historialLogueado.sublist(
+            historialLogueado.length - 6,
+          );
+        }
+
+        // Actualizar el contexto si el backend cambió el contexto
+        idContexto = resultado['id_contexto_usado'];
 
         setState(() {
-          mensajes.add({"texto": "👩‍⚖️ $respuestaAsistente", "tipo": "asistente"});
+          mensajes.add({
+            "texto": "👩‍⚖️ $respuestaAsistente",
+            "tipo": "asistente",
+          });
           _cargando = false;
         });
 
         await _leerTexto(respuestaAsistente);
       } else {
-        throw Exception("Error del servidor");
+        // ================================
+        // 🕵️ USUARIO NO LOGUEADO (ANÓNIMO)
+        // ================================
+        final resultado = await RagService.buscarRespuestaPublica(
+          pregunta: texto,
+          historial: historialAnon,
+        );
+
+        final respuestaAsistente = resultado['respuesta'];
+
+        historialAnon.add("Persona: $texto");
+        historialAnon.add("Asistente: $respuestaAsistente");
+
+        setState(() {
+          mensajes.add({
+            "texto": "👩‍⚖️ $respuestaAsistente",
+            "tipo": "asistente",
+          });
+          _cargando = false;
+        });
+        await _leerTexto(respuestaAsistente);
       }
     } catch (e) {
       setState(() {
-        mensajes.add({"texto": "👩‍⚖️ Lo siento, hubo un problema de conexión.", "tipo": "asistente"});
+        mensajes.add({
+          "texto":
+              "👩‍⚖️ Lo siento, hubo un problema de conexión o un error. ($e)",
+          "tipo": "asistente",
+        });
         _cargando = false;
       });
     }
@@ -80,10 +175,8 @@ class _ChatPantallaState extends State<ChatPantalla> {
     await flutterTts.speak(texto);
   }
 
-  // Función para iniciar o detener la grabación
   Future<void> _iniciarDetenerEscucha() async {
     if (!_escuchando) {
-      // Iniciamos la grabación
       bool disponible = await _speech.initialize(
         onStatus: (val) {
           if (val == "done") {
@@ -98,7 +191,7 @@ class _ChatPantallaState extends State<ChatPantalla> {
       if (disponible) {
         setState(() {
           _escuchando = true;
-          _grabando = true; // Marcamos como grabando
+          _grabando = true;
         });
 
         _speech.listen(
@@ -111,14 +204,13 @@ class _ChatPantallaState extends State<ChatPantalla> {
         );
       }
     } else {
-      // Detenemos la grabación y enviamos el mensaje
       setState(() {
         _escuchando = false;
-        _grabando = false; // Dejamos de grabar
+        _grabando = false;
       });
 
       _speech.stop();
-      await _enviarMensaje(); // Enviamos el mensaje después de grabar
+      await _enviarMensaje();
     }
   }
 
@@ -127,7 +219,7 @@ class _ChatPantallaState extends State<ChatPantalla> {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.blueAccent,
-        title: const Text('Asistente Legal'),
+        title: Text(tituloChat),
         centerTitle: true,
       ),
       drawer: const BarraLateral(),
@@ -181,7 +273,7 @@ class _ChatPantallaState extends State<ChatPantalla> {
                         border: InputBorder.none,
                         contentPadding: EdgeInsets.symmetric(vertical: 8),
                       ),
-                      enabled: !_grabando, // Deshabilitamos el campo mientras grabamos
+                      enabled: !_grabando,
                     ),
                   ),
                 ),
@@ -189,7 +281,7 @@ class _ChatPantallaState extends State<ChatPantalla> {
                 IconButton(
                   icon: Icon(
                     _grabando ? Icons.mic : Icons.mic_none,
-                    color: _grabando ? Colors.red : Colors.blueAccent, // Rojo mientras grabamos
+                    color: _grabando ? Colors.red : Colors.blueAccent,
                   ),
                   onPressed: _iniciarDetenerEscucha,
                 ),
